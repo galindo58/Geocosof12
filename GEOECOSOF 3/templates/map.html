@@ -1,0 +1,89 @@
+{% extends "base.html" %}{% block title %}Mapa{% endblock %}
+{% block head %}<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">{% endblock %}
+{% block content %}
+<div class="page-heading"><div><span class="eyebrow">RECORRIDOS</span><h2>Mapa de materiales disponibles</h2><p>{{ total }} solicitudes disponibles · {{ points|length }} con ubicación exacta en el mapa.</p></div>
+<div class="d-flex flex-wrap gap-2">
+  <button type="button" class="btn btn-outline-success" id="btn-mi-ubicacion">📍 Mi ubicación</button>
+  {% if points %}<a class="btn btn-green" id="btn-ruta-gmaps" href="#" target="_blank" rel="noopener">🧭 Ruta completa en Google Maps</a>{% endif %}
+</div></div>
+<div id="map" class="map-box"></div>
+<div class="small text-muted mt-2" id="ruta-aviso"></div>
+
+{% if sin_coords %}
+<div class="content-card mt-3">
+  <h4>Puntos sin coordenadas</h4>
+  <p class="text-muted small">No tienen latitud/longitud, pero Google Maps los busca por su dirección.</p>
+  <div class="table-responsive"><table class="table align-middle mb-0"><tbody>
+  {% for p in sin_coords %}<tr>
+    <td><b>{{ p.material }}</b><br><span class="text-muted small">{{ p.cantidad }} {{ p.unidad }}</span></td>
+    <td>{{ p.direccion }}<br><span class="text-muted small">{{ p.barrio }}, {{ p.municipio }}, {{ p.departamento }}</span></td>
+    <td class="text-end text-nowrap"><a class="btn btn-sm btn-outline-success" href="{{ p.gmaps_ver }}" target="_blank" rel="noopener">Ver en Google Maps</a> <a class="btn btn-sm btn-green" href="{{ p.gmaps_ruta }}" target="_blank" rel="noopener">Cómo llegar</a></td>
+  </tr>{% endfor %}
+  </tbody></table></div>
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>
+const points = {{ points|tojson }};
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+const map = L.map('map').setView([8.7500, -75.8785], 13);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '&copy; OpenStreetMap', maxZoom: 19}).addTo(map);
+
+points.forEach(p => {
+  L.marker([p.latitud, p.longitud]).addTo(map).bindPopup(
+    `<b>${esc(p.material)}</b><br>${esc(p.cantidad)} ${esc(p.unidad)}<br>${esc(p.barrio)}, ${esc(p.direccion)}<br>` +
+    `<a href="${esc(p.gmaps_ver)}" target="_blank" rel="noopener">Abrir en Google Maps</a> · ` +
+    `<a href="${esc(p.gmaps_ruta)}" target="_blank" rel="noopener">Cómo llegar</a>`
+  );
+});
+if (points.length) map.fitBounds(points.map(p => [p.latitud, p.longitud]), {padding: [30, 30]});
+
+// ---- Ubicación del usuario + ruta completa en Google Maps ----
+let origen = null, marcadorYo = null;
+
+function distancia(a, b) { // haversine aproximado en km
+  const R = 6371, rad = x => x * Math.PI / 180;
+  const dLat = rad(b[0] - a[0]), dLon = rad(b[1] - a[1]);
+  const h = Math.sin(dLat/2)**2 + Math.cos(rad(a[0])) * Math.cos(rad(b[0])) * Math.sin(dLon/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+function construirRuta() {
+  const btn = document.getElementById('btn-ruta-gmaps');
+  if (!btn || !points.length) return;
+  // Orden por vecino más cercano, partiendo de la ubicación del usuario (o del primer punto).
+  let pendientes = points.map(p => [p.latitud, p.longitud]);
+  let actual = origen || pendientes.shift();
+  const orden = origen ? [] : [actual];
+  while (pendientes.length) {
+    let mejor = 0;
+    pendientes.forEach((q, i) => { if (distancia(actual, q) < distancia(actual, pendientes[mejor])) mejor = i; });
+    actual = pendientes.splice(mejor, 1)[0];
+    orden.push(actual);
+  }
+  const MAX = 10; // Google Maps admite 1 destino + 9 paradas
+  const usados = orden.slice(0, MAX);
+  const destino = usados[usados.length - 1];
+  const paradas = usados.slice(0, -1).map(c => c.join(',')).join('|');
+  let url = 'https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=' + encodeURIComponent(destino.join(','));
+  if (paradas) url += '&waypoints=' + encodeURIComponent(paradas);
+  if (origen) url += '&origin=' + encodeURIComponent(origen.join(','));
+  btn.href = url;
+  document.getElementById('ruta-aviso').textContent = orden.length > MAX
+    ? `Google Maps admite hasta ${MAX} paradas por ruta: se incluyeron las ${MAX} más cercanas en orden.`
+    : (origen ? 'La ruta parte de tu ubicación y visita los puntos de menor a mayor distancia.' : 'Activa "Mi ubicación" para que la ruta parta desde donde estás.');
+}
+construirRuta();
+
+document.getElementById('btn-mi-ubicacion').addEventListener('click', () => {
+  if (!navigator.geolocation) { alert('Tu navegador no permite obtener la ubicación.'); return; }
+  navigator.geolocation.getCurrentPosition(pos => {
+    origen = [pos.coords.latitude, pos.coords.longitude];
+    if (marcadorYo) map.removeLayer(marcadorYo);
+    marcadorYo = L.circleMarker(origen, {radius: 9, color: '#fff', weight: 3, fillColor: '#2a6df4', fillOpacity: 1}).addTo(map).bindPopup('Estás aquí');
+    map.setView(origen, 15);
+    construirRuta();
+  }, () => alert('No se pudo obtener tu ubicación. Revisa el permiso del navegador (requiere HTTPS o localhost).'), {enableHighAccuracy: true, timeout: 10000});
+});
+</script>{% endblock %}

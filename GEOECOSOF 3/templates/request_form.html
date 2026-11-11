@@ -1,0 +1,73 @@
+{% extends "base.html" %}{% block title %}{{ 'Editar solicitud' if item else 'Publicar material' }}{% endblock %}
+{% block content %}
+<div class="form-page"><div class="content-card"><span class="eyebrow">PUNTO DE RECOLECCIÓN</span><h2>{{ 'Editar solicitud' if item else 'Publica tu material reciclable' }}</h2><p class="text-muted">Cuéntales a los recicladores qué material tienes y dónde pueden recogerlo.</p>
+<form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<div class="row g-3">
+<div class="col-md-6"><label class="form-label">Tipo de material *</label><select class="form-select" name="material_id" required>{% for m in materiales %}<option value="{{ m.id }}" {% if item and item.material_id==m.id %}selected{% endif %}>{{ m.nombre }}</option>{% endfor %}</select></div>
+<div class="col-md-4"><label class="form-label">Cantidad aproximada *</label><input class="form-control" type="number" name="cantidad" min="0.1" step="0.1" required value="{{ item.cantidad if item else '' }}"></div>
+<div class="col-md-2"><label class="form-label">Unidad</label><select class="form-select" name="unidad"><option value="kg">kg</option><option value="bolsas" {% if item and item.unidad=='bolsas' %}selected{% endif %}>Bolsas</option><option value="unidades" {% if item and item.unidad=='unidades' %}selected{% endif %}>Unidades</option></select></div>
+<div class="col-md-6"><label class="form-label">Dirección *</label><input class="form-control" name="direccion" required placeholder="Ej. Calle  XX # XX-XX" value="{{ item.direccion if item else '' }}"></div>
+<div class="col-md-6"><label class="form-label">Departamento *</label><input class="form-control" name="departamento" required placeholder="Ej. Córdoba" value="{{ item.departamento if item else '' }}"></div>
+<div class="col-md-6"><label class="form-label">Municipio o ciudad *</label><input class="form-control" name="municipio" required placeholder="Ej. Montería" value="{{ item.municipio if item else '' }}"></div>
+<div class="col-md-6"><label class="form-label">Barrio o sector *</label><input class="form-control" name="barrio" required placeholder="Ej. La Castellana" value="{{ item.barrio if item else '' }}"></div>
+<div class="col-12"><label class="form-label">Punto de referencia</label><input class="form-control" name="referencia" placeholder="Casa de reja blanca, frente al parque..." value="{{ item.referencia if item else '' }}"></div>
+<div class="col-md-6"><label class="form-label">Fecha/hora en que estará disponible</label><input class="form-control" type="datetime-local" name="fecha_disponible" value="{{ item.fecha_disponible if item and item.fecha_disponible else '' }}"></div>
+<div class="col-12"><div class="geo-box">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2"><b>📍 Ubicación en Google Maps</b>
+    <div class="d-flex flex-wrap gap-2"><button type="button" class="btn btn-sm btn-outline-success" id="btn-gps">Usar mi ubicación actual</button><a class="btn btn-sm btn-outline-secondary" id="btn-buscar-gmaps" href="https://www.google.com/maps" target="_blank" rel="noopener">Buscar la dirección en Google Maps ↗</a></div></div>
+  <label class="form-label mb-1" for="pegar-gmaps">Pega aquí las coordenadas o el enlace largo de Google Maps</label>
+  <input class="form-control" id="pegar-gmaps" placeholder="Ej. 8.7479, -75.8814  ·  o  https://www.google.com/maps/@8.7479,-75.8814,17z" autocomplete="off">
+  <div class="form-text" id="geo-msg">En Google Maps (celular o PC) mantén presionado el punto exacto y copia los números que aparecen; pégalos arriba y se llenarán solos.</div>
+  <div class="row g-3 mt-1"><div class="col-6"><label class="form-label">Latitud (opcional)</label><input class="form-control" id="lat" name="latitud" type="number" step="any" min="-90" max="90" value="{{ item.latitud if item and item.latitud is not none else '' }}" placeholder="8.75"></div>
+  <div class="col-6"><label class="form-label">Longitud (opcional)</label><input class="form-control" id="lon" name="longitud" type="number" step="any" min="-180" max="180" value="{{ item.longitud if item and item.longitud is not none else '' }}" placeholder="-75.88"></div></div>
+  <iframe id="geo-preview" class="geo-preview" title="Vista previa en Google Maps" loading="lazy" referrerpolicy="no-referrer-when-downgrade" hidden></iframe>
+</div></div>
+<div class="col-12"><label class="form-label">Información adicional</label><textarea class="form-control" name="notas" rows="3" placeholder="Describe cómo está separado o empacado el material.">{{ item.notas if item else '' }}</textarea></div>
+</div><div class="d-flex gap-2 mt-4"><button class="btn btn-green btn-lg">Guardar solicitud</button><a class="btn btn-outline-secondary btn-lg" href="{{ url_for('requests_list') }}">Cancelar</a></div>
+</form></div></div>
+{% endblock %}
+{% block scripts %}<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const lat = $('lat'), lon = $('lon'), msg = $('geo-msg'), prev = $('geo-preview');
+  const valido = (a,b) => isFinite(a) && isFinite(b) && Math.abs(a) <= 90 && Math.abs(b) <= 180;
+  const campo = n => document.querySelector('[name=' + n + ']');
+
+  function actualizar() {
+    const a = parseFloat(lat.value), b = parseFloat(lon.value);
+    const hay = lat.value !== '' && lon.value !== '' && valido(a, b);
+    if (hay) { prev.src = 'https://www.google.com/maps?q=' + a + ',' + b + '&z=17&output=embed'; prev.hidden = false; }
+    else { prev.hidden = true; prev.removeAttribute('src'); }
+    const q = hay ? a + ',' + b
+      : ['direccion','barrio','municipio','departamento'].map(n => (campo(n) || {}).value || '').filter(Boolean).concat('Colombia').join(', ');
+    $('btn-buscar-gmaps').href = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(q);
+  }
+
+  function extraer(texto) {
+    try { texto = decodeURIComponent(texto.trim()); } catch (e) { texto = texto.trim(); }
+    const pat = [/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/, /@(-?\d+\.\d+),\s*(-?\d+\.\d+)/, /[?&](?:q|query|ll|destination)=(-?\d+\.\d+),\s*(-?\d+\.\d+)/, /^\s*(-?\d+(?:\.\d+)?)\s*[,;\s]\s*(-?\d+(?:\.\d+)?)\s*$/];
+    for (const r of pat) { const m = texto.match(r); if (m && valido(+m[1], +m[2])) return [+m[1], +m[2]]; }
+    return null;
+  }
+
+  $('pegar-gmaps').addEventListener('input', e => {
+    const v = e.target.value.trim(); if (!v) return;
+    const c = extraer(v);
+    if (c) { lat.value = c[0]; lon.value = c[1]; msg.textContent = '✔ Coordenadas cargadas: ' + c[0] + ', ' + c[1]; actualizar(); }
+    else if (/maps\.app\.goo\.gl|goo\.gl\/maps/.test(v)) msg.textContent = 'Los enlaces cortos no traen coordenadas. Ábrelo y copia los números del punto o el enlace largo de la barra de direcciones.';
+    else msg.textContent = 'No se reconocieron coordenadas. Usa el formato: 8.7479, -75.8814';
+  });
+
+  $('btn-gps').addEventListener('click', () => {
+    if (!navigator.geolocation) { msg.textContent = 'Tu navegador no permite obtener la ubicación.'; return; }
+    msg.textContent = 'Obteniendo tu ubicación…';
+    navigator.geolocation.getCurrentPosition(p => {
+      lat.value = p.coords.latitude.toFixed(6); lon.value = p.coords.longitude.toFixed(6);
+      msg.textContent = '✔ Ubicación actual cargada (±' + Math.round(p.coords.accuracy) + ' m). Verifica que sea el lugar de recolección.'; actualizar();
+    }, () => { msg.textContent = 'No se pudo obtener la ubicación. Permite el acceso en el navegador (requiere HTTPS o localhost).'; }, {enableHighAccuracy: true, timeout: 10000});
+  });
+
+  [lat, lon, campo('direccion'), campo('barrio'), campo('municipio'), campo('departamento')].forEach(el => el && el.addEventListener('input', actualizar));
+  actualizar();
+})();
+</script>{% endblock %}
